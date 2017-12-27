@@ -1,8 +1,19 @@
 NODE_NAME=bitcoind-node
+PARSER_TAG=jgeer/blockchain_parser:1.22.1
+BLOCKCHAIN_FOLDER=bitcoind-data
+CSV_FOLDER=csv-data
 
 upload:
 	# Upload to the btc_node server
-	rsync -avz --progress --exclude "\.*" . btc_node:~/btc/
+	rsync -avz --progress --exclude="\.*" --include=".dockerignore" . btc_node:~/btc/
+
+setup: install_docker
+	apt-get install --assume-yes \
+		htop \
+		make \
+		tmux \
+		python-pip
+	pip install awscli --upgrade
 
 install_docker:
 	# Setup docker, to allow running the other scripts
@@ -22,10 +33,16 @@ install_docker:
 
 ebs_mount:
 	# Mount an EBS drive for storing the results
-	# mkfs -t ext4 xvdba # to format the drive
-	mount /dev/xvdba ~/btc/bitcoind-data/
+	# mkfs -t ext4 /dev/xvdf # to format the drive
+	mount /dev/xvdg ~/btc/$(BLOCKCHAIN_FOLDER)/
+	mount /dev/xvdf ~/btc/$(CSV_FOLDER)/
 
-btc_start:
+cleanup:
+	docker container prune --force
+	docker rmi $(shell docker images -f dangling=true -q)
+
+## Bitcoin node
+btc_run:
 	# Start the bitcoin node, which will download a copy of the blockchain
 	docker container rm $(NODE_NAME) # delete a stopped version of this container
 	docker run -d \
@@ -36,7 +53,26 @@ btc_start:
 		kylemanna/bitcoind
 	# docker volume create --name=bitcoind-data
 	# -v bitcoind-data:/bitcoin --name=bitcoind-node -d \
-		#
+
 btc_log:
 	# Show what bitcoind has been up to
 	docker logs -f --tail 10 $(NODE_NAME)
+
+## Parse bitcoin blockchain
+parser_run:
+	# Build the docker image (copies code into it)
+	docker build -t $(PARSER_TAG) .
+	docker run -d -t \
+		--name=parser \
+		--mount type=bind,source="$(shell pwd)"/$(BLOCKCHAIN_FOLDER)/.bitcoin/blocks/,target=/home/bitcoin \
+		--mount type=bind,source="$(shell pwd)"/$(CSV_FOLDER),target=/home/csv-data \
+		$(PARSER_TAG)
+
+parser_upload:
+	# Upload the parsed CSVs to S3
+	gzip $(CSV_FOLDER)/*.csv
+	aws s3 cp $(CSV_FOLDER) s3://blockchain-data-1e42/
+
+parser_log:
+	# Show what the parser is up to
+	docker logs -f --tail 10 parser
