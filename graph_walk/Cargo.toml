@@ -1,0 +1,6 @@
+[package]
+name = "graph_walk"
+version = "0.1.0"
+authors = ["jogeer <john@jgeer.com>"]
+
+[dependencies]
