@@ -15,6 +15,7 @@ use std::str;       // strings
 
 use rand::Rng;      // random number generation
 use rocksdb::DB;    // working with the rocksdb
+use std::env;       // command line arguments
 
 const TX_OUT_DB: &'static str = "../graph_data/tx_out_rdb";
 const TX_IN_DB: &'static str = "../graph_data/tx_in_rdb";
@@ -133,15 +134,19 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
 }
 
 fn main() {
-    // if let Err(err) = save_tx_out() {
-    //     println!("error running save_tx_out: {}", err);
-    //     process::exit(1);
-    // }
-    if let Err(err) = save_tx("tx_in") {
-        println!("error running save_tx: {}", err);
-        process::exit(1);
+    let args: Vec<String> = env::args().collect();
+    if args[1] == "tx_in" {
+        if let Err(err) = save_tx("tx_in") {
+            println!("error running save_tx: {}", err);
+            process::exit(1);
+        }
+    } else if args[1] == "tx_out" {
+        if let Err(err) = save_tx("tx_out") {
+            println!("error running save_tx_out: {}", err);
+            process::exit(1);
+        }
     }
 }
 
-// cargo run < ../csv-data/tx_out_sample.csv
-// cargo run < ../csv-data/tx_in_sample.csv
+// cargo run tx_out < ../csv-data/tx_out_sample.csv
+// cargo run tx_in < ../csv-data/tx_in_sample.csv
