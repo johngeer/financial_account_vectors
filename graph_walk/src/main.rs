@@ -48,7 +48,7 @@ struct TxOutSm {
 fn get_present(db: &DB, key: String) -> Vec<TxOutSm> {
     match db.get(key.as_bytes()) {
         Ok(Some(value)) => serde_json::from_slice(&value[..]).unwrap(),
-        Ok(None) => serde_json::from_slice(b"[]").unwrap(),
+        Ok(None) => Vec::new(), // empty vector
         Err(e) => panic!("{}", e)
     }
 }
@@ -56,6 +56,13 @@ fn put_record(db: &DB, key: String, value: Vec<TxOutSm>) {
     db.put(
         key.as_bytes(),
         serde_json::to_string(&value).unwrap().as_bytes());
+}
+fn extend_v<T>(mut present_v: Vec<T>, new_entry: T) -> Vec<T>
+    where T: Ord + PartialEq {
+    present_v.push(new_entry);  // add new value
+    present_v.sort();           // sort, to enable removing duplicates
+    present_v.dedup();          // remove duplicates
+    return present_v;
 }
 
 fn save_tx_out() -> Result<(), Box<Error>> {
@@ -73,15 +80,12 @@ fn save_tx_out() -> Result<(), Box<Error>> {
             address: record.address
         };
         // Check what we already have stored
-        let mut tx_out_v = get_present(&db, record.txid.clone());
-        tx_out_v.push(value);       // add new value
-        tx_out_v.sort();            // sort, to remove duplicates
-        tx_out_v.dedup();           // actually remove duplicates
-        put_record(&db, record.txid.clone(), tx_out_v);
-        let check = get_present(&db, record.txid.clone());
+        let tx_out_v = get_present(&db, record.txid.clone());
+        put_record(&db, record.txid.clone(), extend_v(tx_out_v, value));
 
         // let rand_n = rand::thread_rng().gen_range(1, 1001);
         // if rand_n > 990 { // so that printing doesn't become the bottleneck
+        //     let check = get_present(&db, record.txid.clone());
         //     println!("{}", serde_json::to_string(&check).unwrap());
         // }
     }
@@ -95,4 +99,4 @@ fn main() {
     }
 }
 
-// cargo run < ../csv-data/tx_in_sample.csv
+// cargo run < ../csv-data/tx_out_sample.csv
