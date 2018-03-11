@@ -1,5 +1,6 @@
 NODE_NAME=bitcoind-node
 PARSER_TAG=jgeer/blockchain_parser:1.22.1
+GRAPH_TAG=jgeer/blockchain_graph:1.22.1
 BLOCKCHAIN_FOLDER=bitcoind-data
 CSV_FOLDER=csv-data
 
@@ -76,3 +77,18 @@ parser_upload:
 parser_log:
 	# Show what the parser is up to
 	docker logs -f --tail 10 parser
+
+## Interatively run
+
+run_int:
+	# Run the container interactively, with the present working directory
+	# mounted for easier debugging
+	# NOTE: You may need to set the environment variables in order to query
+	# from the DB
+	docker build -t $(GRAPH_TAG) .
+	docker run \
+		-ti `# run interactively` \
+		--volume "$(shell pwd)":/home/ `#attach the present working directory to the instance` \
+		--rm `# remove container when done` \
+		$(GRAPH_TAG) `# choose the image` \
+		/bin/bash # don't auto-run the script
