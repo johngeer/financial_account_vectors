@@ -7,7 +7,7 @@ extern crate serde;
 extern crate serde_json;
 extern crate rocksdb;
 
-// For reading from stdin
+// For Reading from stdin
 use std::error::Error;
 use std::io;
 use std::process;
@@ -66,11 +66,12 @@ fn get_present_in(db: &DB, key: String) -> Vec<TxInSm> {
     }
 }
 
-fn put_record<T>(db: &DB, key: String, value: Vec<T>)
+fn put_record<T>(db: &DB, key: String, value: Vec<T>, writeopts: &rocksdb::WriteOptions)
     where T: serde::Serialize {
-    db.put(
+    db.put_opt(
         key.as_bytes(),
-        serde_json::to_string(&value).unwrap().as_bytes());
+        serde_json::to_string(&value).unwrap().as_bytes(),
+        writeopts);
 }
 fn no_prev(key: &str) -> bool {
     // Predicate of whether there is no previous for this transaction
@@ -98,6 +99,9 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
         _ => TX_OUT_DB,
     };
     let db = DB::open_default(db_location).unwrap();
+    let mut write_options = rocksdb::WriteOptions::default();
+    // write_options.set_sync(false);
+    write_options.disable_wal(true);
     if direction == "tx_in" {
         for result in rdr.deserialize() {
             // The iterator yields Result<StringRecord, Error>, so we check the
@@ -109,7 +113,7 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
             // Check what we already have stored
             let key: String = format!("{}{}", &record.hashprevout, &record.indexprevout);
             let tx_v: Vec<TxInSm> = get_present_in(&db, key.clone());
-            put_record(&db, key.clone(), extend_v(tx_v, new_entry, &key));
+            put_record(&db, key.clone(), extend_v(tx_v, new_entry, &key), &write_options);
         }
     } else {
         for result in rdr.deserialize() {
@@ -122,7 +126,7 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
             // Check what we already have stored
             let key: String = record.txid.clone();
             let tx_v: Vec<TxOutSm> = get_present_out(&db, key.clone());
-            put_record(&db, key.clone(), extend_v(tx_v, new_entry, &key));
+            put_record(&db, key.clone(), extend_v(tx_v, new_entry, &key), &write_options);
         }
     }
         // let rand_n = rand::thread_rng().gen_range(1, 1001);
