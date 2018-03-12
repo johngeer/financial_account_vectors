@@ -19,6 +19,7 @@ use std::env;       // command line arguments
 
 const TX_OUT_DB: &'static str = "../graph_data/tx_out_rdb";
 const TX_IN_DB: &'static str = "../graph_data/tx_in_rdb";
+const START_HASH_IDX: &'static str = "00000000000000000000000000000000000000000000000000000000000000004294967295";
 
 #[derive(Debug, Deserialize)]
 struct TxIn {
@@ -51,6 +52,7 @@ struct TxOutSm {
     address: String,
 }
 
+// Database operations
 fn get_present_out(db: &DB, key: String) -> Vec<TxOutSm> {
     match db.get(key.as_bytes()) {
         Ok(Some(value)) => serde_json::from_slice(&value[..]).unwrap(),
@@ -65,7 +67,11 @@ fn get_present_in(db: &DB, key: String) -> Vec<TxInSm> {
         Err(e) => panic!("{}", e)
     }
 }
-
+fn update_entry_in(db: &DB, key: String, new_entry: TxInSm, writeopts: &rocksdb::WriteOptions) {
+    // Update the entry, rather than overwriting it
+    let present_v: Vec<TxInSm> = get_present_in(&db, key.clone());
+    put_record(&db, key.clone(), extend_v(present_v, new_entry), writeopts);
+}
 fn put_record<T>(db: &DB, key: String, value: Vec<T>, writeopts: &rocksdb::WriteOptions)
     where T: serde::Serialize {
     db.put_opt(
@@ -73,21 +79,21 @@ fn put_record<T>(db: &DB, key: String, value: Vec<T>, writeopts: &rocksdb::Write
         serde_json::to_string(&value).unwrap().as_bytes(),
         writeopts);
 }
+fn get_start_txid(db: &DB) -> Vec<TxInSm> {
+    println!("{}", String::from(START_HASH_IDX));
+    return get_present_in(db, String::from(START_HASH_IDX));
+}
+
 fn no_prev(key: &str) -> bool {
     // Predicate of whether there is no previous for this transaction
-    return key == "00000000000000000000000000000000000000000000000000000000000000004294967295";
+    return key == START_HASH_IDX;
 }
-fn extend_v<T>(mut present_v: Vec<T>, new_entry: T, key: &str) -> Vec<T>
+fn extend_v<T>(mut present_v: Vec<T>, new_entry: T) -> Vec<T>
     where T: Ord + PartialEq {
-    if no_prev(key) {
-        // In this case they are all unique (no duplicates), and it is a really big list
-        return present_v;
-    } else {
-        present_v.push(new_entry);  // add new value
-        present_v.sort();           // sort, to enable removing duplicates
-        present_v.dedup();          // remove duplicates
-        return present_v;
-    }
+    present_v.push(new_entry);  // add new value
+    present_v.sort();           // sort, to enable removing duplicates
+    present_v.dedup();          // remove duplicates
+    return present_v;
 }
 
 fn save_tx(direction: &str) -> Result<(), Box<Error>> {
@@ -103,6 +109,7 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
     // write_options.set_sync(false);
     write_options.disable_wal(true);
     if direction == "tx_in" {
+        let mut start_v: Vec<TxInSm> = Vec::new();
         for result in rdr.deserialize() {
             // The iterator yields Result<StringRecord, Error>, so we check the
             // error here..
@@ -110,23 +117,35 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
             let new_entry = TxInSm {            // Convert to smaller type
                 txid: record.txid,
             };
-            // Check what we already have stored
             let key: String = format!("{}{}", &record.hashprevout, &record.indexprevout);
-            let tx_v: Vec<TxInSm> = get_present_in(&db, key.clone());
-            put_record(&db, key.clone(), extend_v(tx_v, new_entry, &key), &write_options);
+            if !no_prev(&key) { 
+                update_entry_in(&db, key.clone(), new_entry, &write_options);
+            } else {
+                // There are lots of transactions with no previous transactions.
+                // This allows building a buffer and saving them all at once.
+                start_v.push(new_entry);
+            }
         }
+        // Save the ones without previous transactions
+        let mut present_v: Vec<TxInSm> = get_present_in(
+            &db, String::from(START_HASH_IDX));         // Get present vector from db
+        present_v.append(&mut start_v);                 // Add buffered vector
+        present_v.sort();                               // Prep for dedup
+        present_v.dedup();                              // Remote duplicates
+        put_record(                                     // Save to db
+            &db, String::from(START_HASH_IDX), 
+            present_v, &write_options); 
     } else {
         for result in rdr.deserialize() {
-            let record: TxOut = result?;        // parse CSV
-            let new_entry = TxOutSm {           // Convert to smaller type
+            let record: TxOut = result?;                // parse CSV
+            let new_entry = TxOutSm {                   // Convert to smaller type
                 indexout: record.indexout,
                 value: record.value,
                 address: record.address
             };
-            // Check what we already have stored
             let key: String = record.txid.clone();
             let tx_v: Vec<TxOutSm> = get_present_out(&db, key.clone());
-            put_record(&db, key.clone(), extend_v(tx_v, new_entry, &key), &write_options);
+            put_record(&db, key.clone(), extend_v(tx_v, new_entry), &write_options);
         }
     }
         // let rand_n = rand::thread_rng().gen_range(1, 1001);
@@ -137,18 +156,43 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
     Ok(())
 }
 
+fn random_walk() {
+    // -> Result<(), Box<Error>> {
+    // Randomly walk the stored graph
+    //
+    // connect to both dbs
+    let db_out = DB::open_default(TX_OUT_DB).unwrap();
+    let db_in = DB::open_default(TX_IN_DB).unwrap();
+    let st = get_start_txid(&db_in);
+    println!("{:?}", st.len())
+    // pick a random tx_id (could always start the base one "0000...")
+    // get_present_out(txid)
+        // txid -> (txhash, index, address) # query tx_out
+        //     Lookup the txid in tx_out
+        //     Get the set of outputs
+        //     Choose an ouput (weighted randomization by amount)
+        //     Return the address that recieved that output
+    // get_present_in(format!("{}{}", txhash, index))
+        // (txhash, index) -> tx_id # query tx_in
+        //     Find next transacion
+        //     Find a transaction that has that txhash and index as a previous output (input)
+        //     Return the id for that transaction
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args[1] == "tx_in" {
-        if let Err(err) = save_tx("tx_in") {
+    if args.len() > 1 && args[1] == "tx_in" { // import tx_in
+        if let Err(err) = save_tx("tx_in") {    
             println!("error running save_tx: {}", err);
             process::exit(1);
         }
-    } else if args[1] == "tx_out" {
+    } else if args.len() > 1 && args[1] == "tx_out" { // import tx_out
         if let Err(err) = save_tx("tx_out") {
             println!("error running save_tx_out: {}", err);
             process::exit(1);
         }
+    } else { // random walk
+        random_walk();
     }
 }
 
