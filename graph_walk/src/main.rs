@@ -80,7 +80,6 @@ fn put_record<T>(db: &DB, key: String, value: Vec<T>, writeopts: &rocksdb::Write
         writeopts);
 }
 fn get_start_txid(db: &DB) -> Vec<TxInSm> {
-    println!("{}", String::from(START_HASH_IDX));
     return get_present_in(db, String::from(START_HASH_IDX));
 }
 
@@ -96,6 +95,7 @@ fn extend_v<T>(mut present_v: Vec<T>, new_entry: T) -> Vec<T>
     return present_v;
 }
 
+// Main Operations
 fn save_tx(direction: &str) -> Result<(), Box<Error>> {
     // Build the CSV reader and iterate over each record.
     let mut rdr = csv::Reader::from_reader(io::stdin());
@@ -118,7 +118,7 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
                 txid: record.txid,
             };
             let key: String = format!("{}{}", &record.hashprevout, &record.indexprevout);
-            if !no_prev(&key) { 
+            if !no_prev(&key) {
                 update_entry_in(&db, key.clone(), new_entry, &write_options);
             } else {
                 // There are lots of transactions with no previous transactions.
@@ -155,26 +155,42 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
         // }
     Ok(())
 }
-
 fn random_walk() {
     // -> Result<(), Box<Error>> {
-    // Randomly walk the stored graph
+    // Randomly walk the transaction graph
     //
-    // connect to both dbs
+    // Connect To Both DBs
     let db_out = DB::open_default(TX_OUT_DB).unwrap();
     let db_in = DB::open_default(TX_IN_DB).unwrap();
-    let st = get_start_txid(&db_in);
-    println!("{:?}", st.len())
-    // pick a random tx_id (could always start the base one "0000...")
+    // Pick An Starting Transaction
+    // NOTE: future versions might not want to start with a starting transaction
+    let mut tx_in_v = get_start_txid(&db_in);
+    let mut present_txin = rand::thread_rng().choose(&tx_in_v).unwrap();
+    println!("txid: {:?}", present_txin.txid);
+    let mut tx_out_v = get_present_out(&db_out, present_txin.txid.clone());
+    let mut present_txout = rand::thread_rng().choose(&tx_out_v).unwrap();
+    // TODO: weight this randomization by transaction value
+    println!("address: {:?}", present_txout.address);
+    let mut key: String = format!("{}{}", present_txin.txid.clone(), present_txout.indexout.clone());
+    tx_in_v = get_present_in(&db_in, key);
+    println!("tx_in_v: {:?}", tx_in_v);
+    // Get The Query Information
+    // for i in 0..10 {
+        // // TODO: weight this randomization by transaction value
+        // println!("address: {:?}", present_txout.address);
+        // let key: String = format!("{}{}", present_txin.txid.clone(), present_txout.indexout.clone());
+        // let present_txin = get_present_in(&db_in, key);
+        // println!("txid: {:?}", present_txin);
+    // }
     // get_present_out(txid)
         // txid -> (txhash, index, address) # query tx_out
         //     Lookup the txid in tx_out
         //     Get the set of outputs
-        //     Choose an ouput (weighted randomization by amount)
-        //     Return the address that recieved that output
+        //     Choose an output (weighted randomization by amount)
+        //     Return the address that received that output
     // get_present_in(format!("{}{}", txhash, index))
         // (txhash, index) -> tx_id # query tx_in
-        //     Find next transacion
+        //     Find next transaction
         //     Find a transaction that has that txhash and index as a previous output (input)
         //     Return the id for that transaction
 }
