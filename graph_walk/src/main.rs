@@ -30,7 +30,7 @@ struct TxIn {
     sequence: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct TxInSm {
     txid: String,
 }
@@ -45,14 +45,14 @@ struct TxOut {
     unspent: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct TxOutSm {
     indexout: String,
     value: String,
     address: String,
 }
 
-// Database operations
+// Database Operations
 fn get_present_out(db: &DB, key: String) -> Vec<TxOutSm> {
     match db.get(key.as_bytes()) {
         Ok(Some(value)) => serde_json::from_slice(&value[..]).unwrap(),
@@ -92,7 +92,11 @@ fn extend_v<T>(mut present_v: Vec<T>, new_entry: T) -> Vec<T>
     present_v.push(new_entry);  // add new value
     present_v.sort();           // sort, to enable removing duplicates
     present_v.dedup();          // remove duplicates
-    return present_v;
+    return present_v
+}
+fn rand_index(high: usize) -> usize {
+    // return a random index for a vector of length T
+    rand::thread_rng().gen_range(0, high)
 }
 
 // Main Operations
@@ -162,37 +166,38 @@ fn random_walk() {
     // Connect To Both DBs
     let db_out = DB::open_default(TX_OUT_DB).unwrap();
     let db_in = DB::open_default(TX_IN_DB).unwrap();
-    // Pick An Starting Transaction
-    // NOTE: future versions might not want to start with a starting transaction
-    let mut tx_in_v = get_start_txid(&db_in);
-    let mut present_txin = rand::thread_rng().choose(&tx_in_v).unwrap();
-    println!("txid: {:?}", present_txin.txid);
-    let mut tx_out_v = get_present_out(&db_out, present_txin.txid.clone());
-    let mut present_txout = rand::thread_rng().choose(&tx_out_v).unwrap();
-    // TODO: weight this randomization by transaction value
-    println!("address: {:?}", present_txout.address);
-    let mut key: String = format!("{}{}", present_txin.txid.clone(), present_txout.indexout.clone());
-    tx_in_v = get_present_in(&db_in, key);
-    println!("tx_in_v: {:?}", tx_in_v);
-    // Get The Query Information
-    // for i in 0..10 {
-        // // TODO: weight this randomization by transaction value
-        // println!("address: {:?}", present_txout.address);
-        // let key: String = format!("{}{}", present_txin.txid.clone(), present_txout.indexout.clone());
-        // let present_txin = get_present_in(&db_in, key);
-        // println!("txid: {:?}", present_txin);
-    // }
-    // get_present_out(txid)
-        // txid -> (txhash, index, address) # query tx_out
-        //     Lookup the txid in tx_out
-        //     Get the set of outputs
-        //     Choose an output (weighted randomization by amount)
-        //     Return the address that received that output
-    // get_present_in(format!("{}{}", txhash, index))
-        // (txhash, index) -> tx_id # query tx_in
-        //     Find next transaction
-        //     Find a transaction that has that txhash and index as a previous output (input)
-        //     Return the id for that transaction
+    // Pick A Starting Transaction
+    let mut tx_in_v: Vec<TxInSm> = Vec::new();
+    // NOTE: Future versions might not want to start with an initial transaction
+    for _i in 0..100 {
+        // If there are no transactions this is an input for, get all "starting transactions"
+        if tx_in_v.len() == 0 {
+            println!("Getting starting transaction");
+            tx_in_v = get_start_txid(&db_in);
+        }
+
+        // Pick Transaction Input, Get The Associated Transaction Id
+        let present_txin = tx_in_v
+            .get(rand_index(tx_in_v.len())) // Get a random entry, by index
+            // TODO: Weight This Randomization By Transaction Value
+            .unwrap().clone();
+        // println!("txid: {:?}", present_txin.txid);
+
+        // Choose An Output Of That Transaction
+        let tx_out_v = get_present_out(&db_out, present_txin.txid.clone());
+        let present_txout = tx_out_v
+            .get(rand_index(tx_out_v.len()))
+            // TODO: Weight The Randomization By Transaction Value
+            .unwrap().clone();
+        println!("address: {:?}", present_txout.address);
+
+        // Get A Transaction This Is An Input To
+        let key: String = format!("{}{}",
+            present_txin.txid.clone(), present_txout.indexout.clone());
+        // println!("key: {:?}", key);
+        tx_in_v = get_present_in(&db_in, key);
+        // println!("tx_in_v: {:?}", tx_in_v);
+    }
 }
 
 fn main() {
