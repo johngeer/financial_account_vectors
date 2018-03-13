@@ -160,31 +160,38 @@ fn save_tx(direction: &str) -> Result<(), Box<Error>> {
     Ok(())
 }
 fn random_walk() {
-    // -> Result<(), Box<Error>> {
     // Randomly walk the transaction graph
     //
     // Connect To Both DBs
     let db_out = DB::open_default(TX_OUT_DB).unwrap();
     let db_in = DB::open_default(TX_IN_DB).unwrap();
     // Pick A Starting Transaction
+    let starting_transactions = get_start_txid(&db_in);
     let mut tx_in_v: Vec<TxInSm> = Vec::new();
     // NOTE: Future versions might not want to start with an initial transaction
-    for _i in 0..100 {
-        // If there are no transactions this is an input for, get all "starting transactions"
-        if tx_in_v.len() == 0 {
-            println!("Getting starting transaction");
-            tx_in_v = get_start_txid(&db_in);
-        }
-
+    for _i in 0..10000 {
         // Pick Transaction Input, Get The Associated Transaction Id
-        let present_txin = tx_in_v
-            .get(rand_index(tx_in_v.len())) // Get a random entry, by index
-            // TODO: Weight This Randomization By Transaction Value
-            .unwrap().clone();
-        // println!("txid: {:?}", present_txin.txid);
+        let present_txin_id: String = match tx_in_v.len() {
+            0 => {
+                // If there are no transactions this is an input for, get all "starting
+                // transactions"
+                println!("Getting starting transaction");
+                let x = &starting_transactions
+                    .get(rand_index(starting_transactions.len())) // Get a random entry, by index
+                    // TODO: Weight This Randomization By Transaction Value
+                    .unwrap().txid;
+                x.clone()
+            },
+            _ => {
+                tx_in_v
+                    .get(rand_index(tx_in_v.len())) // Get a random entry, by index
+                    // TODO: Weight This Randomization By Transaction Value
+                    .unwrap().txid.clone()
+            }
+        };
 
         // Choose An Output Of That Transaction
-        let tx_out_v = get_present_out(&db_out, present_txin.txid.clone());
+        let tx_out_v = get_present_out(&db_out, present_txin_id.clone());
         let present_txout = tx_out_v
             .get(rand_index(tx_out_v.len()))
             // TODO: Weight The Randomization By Transaction Value
@@ -193,7 +200,7 @@ fn random_walk() {
 
         // Get A Transaction This Is An Input To
         let key: String = format!("{}{}",
-            present_txin.txid.clone(), present_txout.indexout.clone());
+            present_txin_id.clone(), present_txout.indexout.clone());
         // println!("key: {:?}", key);
         tx_in_v = get_present_in(&db_in, key);
         // println!("tx_in_v: {:?}", tx_in_v);
